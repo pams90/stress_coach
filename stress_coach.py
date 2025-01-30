@@ -1,5 +1,7 @@
 import streamlit as st
 import datetime
+import pandas as pd
+import os
 
 # Initialize session state for user data
 if 'stress_data' not in st.session_state:
@@ -45,12 +47,22 @@ def mindfulness_activity():
 def play_music():
     st.write("### Background Music")
     music_options = {
-        "Meditation Music": ["https://example.com/meditation1.mp3", "https://example.com/meditation2.mp3"],
-        "Relaxing Music": ["https://example.com/relax1.mp3", "https://example.com/relax2.mp3"]
+        "Meditation Music": [
+            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/meditation1.mp3?raw=true",
+            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/meditation2.mp3?raw=true"
+        ],
+        "Relaxing Music": [
+            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/relax1.mp3?raw=true",
+            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/relax2.mp3?raw=true"
+        ]
     }
     music_category = st.selectbox("Choose a music type:", list(music_options.keys()))
     selected_music = st.selectbox("Choose a track:", music_options[music_category])
-    st.audio(selected_music, format="audio/mp3")
+
+    try:
+      st.audio(selected_music, format="audio/mp3")
+    except Exception as e:
+      st.error(f"Error playing music: {e}. Please check your audio URLs are valid.")
 
 # App layout
 st.title("Personalized Stress Management Coach")
@@ -60,8 +72,14 @@ menu = ["Home", "Breathing Exercises", "Mindfulness Activities", "Log Stress", "
 choice = st.sidebar.selectbox("Navigate", menu)
 
 if choice == "Home":
-    st.write("## Welcome!")
-    st.write("Select an option from the menu to begin managing your stress.")
+    st.write("## Welcome to Your Stress Management Coach!")
+    st.write("""
+        This app provides a collection of tools to help you manage stress, including breathing exercises, mindfulness activities, stress logging, and a journal.
+        Navigate using the sidebar menu to get started.
+    """)
+    st.write("### Get Started")
+    st.write("Use the sidebar to select a feature.")
+
 
 elif choice == "Breathing Exercises":
     st.write("## Breathing Exercises")
@@ -79,16 +97,22 @@ elif choice == "Log Stress":
     st.write("## Log Your Stress Level")
     stress_level = st.slider("How stressed are you feeling right now?", 0, 10, 5)
     if st.button("Log Stress Level"):
+      if stress_level is not None:
         timestamp = datetime.datetime.now()
         log_stress(stress_level, timestamp)
         st.success(f"Stress level {stress_level} logged at {timestamp}.")
+      else:
+        st.error("Please select a stress level.")
 
 elif choice == "Insights":
     st.write("## Your Stress Insights")
     if st.session_state['stress_data']:
         st.write("### Stress Levels Over Time")
-        for entry in st.session_state['stress_data']:
-            st.write(f"- Level {entry['level']} at {entry['timestamp']}")
+        # Convert data to a Pandas DataFrame for easy plotting
+        df = pd.DataFrame(st.session_state['stress_data'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df = df.set_index('timestamp')
+        st.line_chart(df['level'])
     else:
         st.write("No stress data logged yet.")
 
@@ -96,9 +120,12 @@ elif choice == "Journal":
     st.write("## Journal")
     journal_entry = st.text_area("Write your thoughts here:")
     if st.button("Save Entry"):
+      if journal_entry:
         timestamp = datetime.datetime.now()
         log_journal(journal_entry, timestamp)
         st.success("Journal entry saved.")
+      else:
+        st.error("Please add a journal entry.")
     st.write("### Past Entries")
     if st.session_state['journal_entries']:
         for entry in st.session_state['journal_entries']:
