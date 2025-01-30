@@ -44,6 +44,8 @@ def mindfulness_activity():
     st.write(activities[activity])
 
 # Function to play background music
+import streamlit as st
+
 def play_music():
     st.write("### Background Music")
     music_options = {
@@ -60,9 +62,11 @@ def play_music():
     selected_music = st.selectbox("Choose a track:", music_options[music_category])
 
     try:
-      st.audio(selected_music, format="audio/mp3")
+        st.audio(selected_music, format="audio/mp3")
     except Exception as e:
-      st.error(f"Error playing music: {e}. Please check your audio URLs are valid.")
+        st.error(f"Error playing audio: {e}")
+        st.error(f"Selected URL: {selected_music}")
+        st.error("Please check the URL is valid and that you are using a supported browser.")
 
 # App layout
 st.title("Personalized Stress Management Coach")
