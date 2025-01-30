@@ -1,86 +1,85 @@
-from flask import Flask, request, jsonify, send_file
-import numpy as np
-from pydub import AudioSegment
-from pydub.generators import Sine
-import io
+import streamlit as st
+import requests
 import os
 
-app = Flask(__name__)
+# Flask API URL (Change if needed)
+API_URL = "http://localhost:5000"
 
-# Ensure directories exist
-os.makedirs("background_sounds", exist_ok=True)
-os.makedirs("user_backgrounds", exist_ok=True)
-
-# Helper function to generate binaural beats
-def generate_binaural_beats(frequency_left, frequency_right, duration_seconds, background=None):
-    sample_rate = 44100
-    duration = duration_seconds * 1000
-
-    # Create left and right channels
-    left = Sine(frequency_left).to_audio_segment(duration=duration)
-    right = Sine(frequency_right).to_audio_segment(duration=duration)
-
-    # Combine into stereo sound
-    stereo_sound = AudioSegment.from_mono_audiosegments(left, right)
-
-    # Mix with background sound if provided
-    if background:
-        background_sound = AudioSegment.from_file(background)
-        background_sound = background_sound[:duration]  # Match duration
-        stereo_sound = stereo_sound.overlay(background_sound)
-
-    return stereo_sound
-
-@app.route('/generate', methods=['POST'])
-def generate():
+def get_background_sounds():
     try:
-        data = request.json
-        frequency_left = float(data.get("frequency_left", 200))
-        frequency_right = float(data.get("frequency_right", 210))
-        duration = int(data.get("duration", 30))
-        background = data.get("background")
+        response = requests.get(f"{API_URL}/background-sounds")
+        response.raise_for_status()
+        return response.json().get("background_sounds", [])
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching background sounds: {e}")
+        return []
 
-        if not (20 <= frequency_left <= 2000 and 20 <= frequency_right <= 2000):
-            return jsonify({"error": "Frequencies must be between 20 and 2000 Hz"}), 400
-        if not (1 <= duration <= 3600):
-            return jsonify({"error": "Duration must be between 1 and 3600 seconds"}), 400
+def upload_background_file(file):
+    try:
+        files = {'file': file}
+        response = requests.post(f"{API_URL}/upload-background", files=files)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error uploading file: {e}")
+        return None
 
-        background_path = None
+
+def generate_binaural_beat(frequency_left, frequency_right, duration, background):
+    try:
+        payload = {
+            "frequency_left": frequency_left,
+            "frequency_right": frequency_right,
+            "duration": duration,
+        }
         if background:
-            background_path = os.path.join("background_sounds", background) if background in os.listdir("background_sounds") else os.path.join("user_backgrounds", background)
-            if not os.path.exists(background_path):
-                return jsonify({"error": "Background sound not found"}), 400
+             payload["background"] = background
 
-        audio = generate_binaural_beats(frequency_left, frequency_right, duration, background_path)
 
-        buffer = io.BytesIO()
-        audio.export(buffer, format="mp3")
-        buffer.seek(0)
+        response = requests.post(f"{API_URL}/generate", json=payload)
+        response.raise_for_status()
+        return response.content
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error generating binaural beat: {e}")
+        return None
 
-        return send_file(buffer, as_attachment=True, download_name="binaural_beat.mp3", mimetype="audio/mpeg")
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+st.title("Binaural Beat Generator")
 
-@app.route('/upload-background', methods=['POST'])
-def upload_background():
-    try:
-        file = request.files['file']
-        if not file:
-            return jsonify({"error": "No file provided"}), 400
+# Input fields
+col1, col2 = st.columns(2)
+with col1:
+   frequency_left = st.number_input("Left Frequency (Hz)", min_value=20, max_value=2000, value=200, step=1)
+with col2:
+   frequency_right = st.number_input("Right Frequency (Hz)", min_value=20, max_value=2000, value=210, step=1)
 
-        if file.mimetype not in ['audio/mpeg', 'audio/wav']:
-            return jsonify({"error": "Only MP3 and WAV formats are supported"}), 400
+duration = st.number_input("Duration (seconds)", min_value=1, max_value=3600, value=30, step=1)
 
-        if len(file.read()) > 10 * 1024 * 1024:  # 10 MB size limit
-            return jsonify({"error": "File size exceeds 10 MB limit"}), 400
 
-        file.seek(0)  # Reset file pointer
-        save_path = os.path.join("user_backgrounds", file.filename)
-        file.save(save_path)
+# Background Sound
+background_options = get_background_sounds()
+background_options = ["None"] + background_options
+selected_background = st.selectbox("Background Sound", options=background_options)
 
-        return jsonify({"message": "File uploaded successfully", "filename": file.filename}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# Upload Background
+uploaded_file = st.file_uploader("Upload Background Sound (MP3 or WAV)", type=["mp3", "wav"])
 
-if __name__ == '__main__':
-    app.run(debug=True)
+if uploaded_file:
+    if st.button("Upload Audio File"):
+        upload_response = upload_background_file(uploaded_file)
+        if upload_response:
+           st.success(f"File uploaded successfully")
+           background_options = get_background_sounds()
+           background_options = ["None"] + background_options
+           selected_background = st.selectbox("Background Sound", options=background_options, index=0) # Reset selection
+
+
+# Generate Audio button
+if st.button("Generate Binaural Beat"):
+    background = selected_background if selected_background != "None" else None
+
+    with st.spinner("Generating audio..."):
+        audio_bytes = generate_binaural_beat(frequency_left, frequency_right, duration, background)
+
+    if audio_bytes:
+        st.audio(audio_bytes, format="audio/mpeg")
+        st.success("Binaural beat generated!")
