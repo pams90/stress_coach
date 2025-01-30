@@ -7,7 +7,9 @@ API_URL = "http://localhost:5000"
 
 def get_background_sounds():
     try:
+        st.write("Fetching background sounds from API...")
         response = requests.get(f"{API_URL}/background-sounds")
+        st.write("API call complete...")
         response.raise_for_status()
         return response.json().get("background_sounds", [])
     except requests.exceptions.RequestException as e:
