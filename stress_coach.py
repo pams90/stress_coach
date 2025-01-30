@@ -1,138 +1,86 @@
-import streamlit as st
-import datetime
-import pandas as pd
+from flask import Flask, request, jsonify, send_file
+import numpy as np
+from pydub import AudioSegment
+from pydub.generators import Sine
+import io
 import os
 
-# Initialize session state for user data
-if 'stress_data' not in st.session_state:
-    st.session_state['stress_data'] = []
-if 'journal_entries' not in st.session_state:
-    st.session_state['journal_entries'] = []
+app = Flask(__name__)
 
-# Function to log stress level
-def log_stress(level, timestamp):
-    st.session_state['stress_data'].append({'level': level, 'timestamp': timestamp})
+# Ensure directories exist
+os.makedirs("background_sounds", exist_ok=True)
+os.makedirs("user_backgrounds", exist_ok=True)
 
-# Function to log journal entry
-def log_journal(entry, timestamp):
-    st.session_state['journal_entries'].append({'entry': entry, 'timestamp': timestamp})
+# Helper function to generate binaural beats
+def generate_binaural_beats(frequency_left, frequency_right, duration_seconds, background=None):
+    sample_rate = 44100
+    duration = duration_seconds * 1000
 
-# Function to display breathing exercises
-def breathing_exercise():
-    st.write("### Breathing Exercises")
-    options = {
-        "4-7-8 Breathing": ["Inhale through your nose for 4 seconds.", "Hold your breath for 7 seconds.", "Exhale slowly through your mouth for 8 seconds.", "Repeat for 4 cycles."],
-        "Box Breathing": ["Inhale through your nose for 4 seconds.", "Hold your breath for 4 seconds.", "Exhale through your mouth for 4 seconds.", "Hold your breath again for 4 seconds.", "Repeat for 4 cycles."],
-        "Diaphragmatic Breathing": ["Place one hand on your chest and the other on your stomach.", "Breathe in deeply through your nose, feeling your stomach rise.", "Exhale slowly through pursed lips, feeling your stomach fall.", "Repeat for 5 minutes."]
-    }
-    exercise = st.selectbox("Choose a breathing exercise:", list(options.keys()))
-    st.write("### Instructions:")
-    for step in options[exercise]:
-        st.write(f"- {step}")
+    # Create left and right channels
+    left = Sine(frequency_left).to_audio_segment(duration=duration)
+    right = Sine(frequency_right).to_audio_segment(duration=duration)
 
-# Function to display mindfulness activities
-def mindfulness_activity():
-    st.write("### Mindfulness Activities")
-    activities = {
-        "Gratitude List": "Write down three things you are grateful for today.",
-        "Body Scan": "Close your eyes and focus on each part of your body, starting from your toes and moving upward.",
-        "5 Senses Exercise": "Name 5 things you can see, 4 things you can touch, 3 things you can hear, 2 things you can smell, and 1 thing you can taste.",
-        "Mindful Eating": "Take a small bite of food. Focus on its texture, taste, and smell as you chew slowly."
-    }
-    activity = st.selectbox("Choose a mindfulness activity:", list(activities.keys()))
-    st.write("### Instructions:")
-    st.write(activities[activity])
+    # Combine into stereo sound
+    stereo_sound = AudioSegment.from_mono_audiosegments(left, right)
 
-# Function to play background music
-import streamlit as st
+    # Mix with background sound if provided
+    if background:
+        background_sound = AudioSegment.from_file(background)
+        background_sound = background_sound[:duration]  # Match duration
+        stereo_sound = stereo_sound.overlay(background_sound)
 
-def play_music():
-    st.write("### Background Music")
-    music_options = {
-        "Meditation Music": [
-            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/meditation1.mp3?raw=true",
-            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/meditation2.mp3?raw=true"
-        ],
-        "Relaxing Music": [
-            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/relax1.mp3?raw=true",
-            "https://github.com/Coding-with-Adam/streamlit-stress-coach/blob/main/music/relax2.mp3?raw=true"
-        ]
-    }
-    music_category = st.selectbox("Choose a music type:", list(music_options.keys()))
-    selected_music = st.selectbox("Choose a track:", music_options[music_category])
+    return stereo_sound
 
+@app.route('/generate', methods=['POST'])
+def generate():
     try:
-        st.audio(selected_music, format="audio/mp3")
+        data = request.json
+        frequency_left = float(data.get("frequency_left", 200))
+        frequency_right = float(data.get("frequency_right", 210))
+        duration = int(data.get("duration", 30))
+        background = data.get("background")
+
+        if not (20 <= frequency_left <= 2000 and 20 <= frequency_right <= 2000):
+            return jsonify({"error": "Frequencies must be between 20 and 2000 Hz"}), 400
+        if not (1 <= duration <= 3600):
+            return jsonify({"error": "Duration must be between 1 and 3600 seconds"}), 400
+
+        background_path = None
+        if background:
+            background_path = os.path.join("background_sounds", background) if background in os.listdir("background_sounds") else os.path.join("user_backgrounds", background)
+            if not os.path.exists(background_path):
+                return jsonify({"error": "Background sound not found"}), 400
+
+        audio = generate_binaural_beats(frequency_left, frequency_right, duration, background_path)
+
+        buffer = io.BytesIO()
+        audio.export(buffer, format="mp3")
+        buffer.seek(0)
+
+        return send_file(buffer, as_attachment=True, download_name="binaural_beat.mp3", mimetype="audio/mpeg")
     except Exception as e:
-        st.error(f"Error playing audio: {e}")
-        st.error(f"Selected URL: {selected_music}")
-        st.error("Please check the URL is valid and that you are using a supported browser.")
+        return jsonify({"error": str(e)}), 500
 
-# App layout
-st.title("Personalized Stress Management Coach")
+@app.route('/upload-background', methods=['POST'])
+def upload_background():
+    try:
+        file = request.files['file']
+        if not file:
+            return jsonify({"error": "No file provided"}), 400
 
-# Navigation menu
-menu = ["Home", "Breathing Exercises", "Mindfulness Activities", "Log Stress", "Insights", "Journal"]
-choice = st.sidebar.selectbox("Navigate", menu)
+        if file.mimetype not in ['audio/mpeg', 'audio/wav']:
+            return jsonify({"error": "Only MP3 and WAV formats are supported"}), 400
 
-if choice == "Home":
-    st.write("## Welcome to Your Stress Management Coach!")
-    st.write("""
-        This app provides a collection of tools to help you manage stress, including breathing exercises, mindfulness activities, stress logging, and a journal.
-        Navigate using the sidebar menu to get started.
-    """)
-    st.write("### Get Started")
-    st.write("Use the sidebar to select a feature.")
+        if len(file.read()) > 10 * 1024 * 1024:  # 10 MB size limit
+            return jsonify({"error": "File size exceeds 10 MB limit"}), 400
 
+        file.seek(0)  # Reset file pointer
+        save_path = os.path.join("user_backgrounds", file.filename)
+        file.save(save_path)
 
-elif choice == "Breathing Exercises":
-    st.write("## Breathing Exercises")
-    breathing_exercise()
-    st.write("### Optional: Play Mindful Background Music")
-    play_music()
+        return jsonify({"message": "File uploaded successfully", "filename": file.filename}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-elif choice == "Mindfulness Activities":
-    st.write("## Mindfulness Activities")
-    mindfulness_activity()
-    st.write("### Optional: Play Mindful Background Music")
-    play_music()
-
-elif choice == "Log Stress":
-    st.write("## Log Your Stress Level")
-    stress_level = st.slider("How stressed are you feeling right now?", 0, 10, 5)
-    if st.button("Log Stress Level"):
-      if stress_level is not None:
-        timestamp = datetime.datetime.now()
-        log_stress(stress_level, timestamp)
-        st.success(f"Stress level {stress_level} logged at {timestamp}.")
-      else:
-        st.error("Please select a stress level.")
-
-elif choice == "Insights":
-    st.write("## Your Stress Insights")
-    if st.session_state['stress_data']:
-        st.write("### Stress Levels Over Time")
-        # Convert data to a Pandas DataFrame for easy plotting
-        df = pd.DataFrame(st.session_state['stress_data'])
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.set_index('timestamp')
-        st.line_chart(df['level'])
-    else:
-        st.write("No stress data logged yet.")
-
-elif choice == "Journal":
-    st.write("## Journal")
-    journal_entry = st.text_area("Write your thoughts here:")
-    if st.button("Save Entry"):
-      if journal_entry:
-        timestamp = datetime.datetime.now()
-        log_journal(journal_entry, timestamp)
-        st.success("Journal entry saved.")
-      else:
-        st.error("Please add a journal entry.")
-    st.write("### Past Entries")
-    if st.session_state['journal_entries']:
-        for entry in st.session_state['journal_entries']:
-            st.write(f"- {entry['timestamp']}: {entry['entry']}")
-    else:
-        st.write("No journal entries yet.")
+if __name__ == '__main__':
+    app.run(debug=True)
